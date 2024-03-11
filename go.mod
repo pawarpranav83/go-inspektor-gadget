@@ -1,4 +1,4 @@
-module github.com/pawarpranav83/go-inspektor-gadget
+module github.com/pawarpranav83/ig-testing-framework
 
 go 1.22.1
 

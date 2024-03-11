@@ -1,7 +1,7 @@
 package main
 
 import (
-	IG "github.com/pawarpranav83/go-inspektor-gadget/ig"
+	IG "github.com/pawarpranav83/ig-testing-framework/ig"
 )
 
 func main() {
