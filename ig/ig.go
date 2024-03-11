@@ -100,11 +100,11 @@ func New(opts ...option) (*IG, error) {
 
 	vstring, err := getIgVersionString(ig.path)
 	if err != nil {
-		return nil, fmt.Errorf("could not get iptables version: %v", err)
+		return nil, fmt.Errorf("could not get ig version: %v", err)
 	}
 	v1, v2, v3, err := extractIgVersion(vstring)
 	if err != nil {
-		return nil, fmt.Errorf("failed to extract iptables version from [%s]: %v", vstring, err)
+		return nil, fmt.Errorf("failed to extract ig version from [%s]: %v", vstring, err)
 	}
 	ig.v1 = v1
 	ig.v2 = v2
@@ -129,8 +129,8 @@ func (ig *IG) Push(flags ...string) error {
 	return nil
 }
 
-func (ig *IG) Remove() error {
-	cmd := []string{"image", "remove", ig.image}
+func (ig *IG) Remove(flags ...string) error {
+	cmd := append([]string{"image", "remove", ig.image}, flags...)
 	if err := ig.runWithOutput(cmd); err != nil {
 		return err
 	}
@@ -149,6 +149,7 @@ func (ig *IG) Run(flags ...string) (string, error) {
 
 // runWithOutput runs an ig command with the given arguments,
 // writing any stdout output to the os output
+// TODO: replace os with custom
 func (ig *IG) runWithOutput(args []string) error {
 	cmd := exec.Command(ig.path, args...)
 	cmd.Env = append(cmd.Env, "IG_EXPERIMENTAL=true")
