@@ -1,31 +1,44 @@
+// Copyright 2019-2021 The Inspektor Gadget authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package ig
 
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
-	"regexp"
-	"strconv"
+
+	"github.com/blang/semver"
 )
 
 type IG struct {
-	path  string
-	image string
-	v1    int
-	v2    int
-	v3    int
+	path    string
+	image   string
+	version semver.Version
 }
 
 type option func(*IG)
 
-func Path(path string) option {
+func WithPath(path string) option {
 	return func(ig *IG) {
 		ig.path = path
 	}
 }
 
-func Image(image string) option {
+func WithImage(image string) option {
 	return func(ig *IG) {
 		ig.image = image
 	}
@@ -45,70 +58,38 @@ func getIgVersionString(path string) (string, error) {
 
 // Returns the first three components of the version
 // e.g. "v0.26.0" would return (0, 26, 0)
-func extractIgVersion(str string) (int, int, int, error) {
-	versionMatcher := regexp.MustCompile(`v([0-9]+)\.([0-9]+)\.([0-9]+)`)
-	result := versionMatcher.FindStringSubmatch(str)
-	if result == nil {
-		return 0, 0, 0, fmt.Errorf("no ig version found in string: %s", str)
-	}
-
-	v1, err := strconv.Atoi(result[1])
+func extractIgVersion(str string) (semver.Version, error) {
+	parsedVersion, err := semver.ParseTolerant(str)
 	if err != nil {
-		return 0, 0, 0, err
+		return parsedVersion, fmt.Errorf("parsing version from string[%s]: %w]", str, err)
 	}
-
-	v2, err := strconv.Atoi(result[2])
-	if err != nil {
-		return 0, 0, 0, err
-	}
-
-	v3, err := strconv.Atoi(result[3])
-	if err != nil {
-		return 0, 0, 0, err
-	}
-
-	return v1, v2, v3, nil
+	return parsedVersion, nil
 }
 
 // New creates a new IG configured with the options passed as parameters.
 // Supported parameters are:
 //
-//	Image(gadget_image)
-//	Path(string)
+//	WithImage(gadget_image)
+//	WithPath(string)
 func New(opts ...option) (*IG, error) {
 
 	ig := &IG{
-		path: "",
+		path: "ig",
 	}
 
 	for _, opt := range opts {
 		opt(ig)
 	}
 
-	// if path wasn't preset through New(Path()), autodiscover it
-	cmd := ""
-	if ig.path == "" {
-		cmd = "ig"
-	} else {
-		cmd = ig.path
-	}
-	path, err := exec.LookPath(cmd)
-	if err != nil {
-		return nil, err
-	}
-	ig.path = path
-
 	vstring, err := getIgVersionString(ig.path)
 	if err != nil {
-		return nil, fmt.Errorf("could not get ig version: %v", err)
+		return nil, fmt.Errorf("obtaining ig version: %w", err)
 	}
-	v1, v2, v3, err := extractIgVersion(vstring)
+	parsedVersion, err := extractIgVersion(vstring)
 	if err != nil {
-		return nil, fmt.Errorf("failed to extract ig version from [%s]: %v", vstring, err)
+		return nil, fmt.Errorf("extracting ig version: %w", err)
 	}
-	ig.v1 = v1
-	ig.v2 = v2
-	ig.v3 = v3
+	ig.version = parsedVersion
 
 	return ig, nil
 }
@@ -137,14 +118,17 @@ func (ig *IG) Remove(flags ...string) error {
 	return nil
 }
 
-func (ig *IG) Run(flags ...string) (string, error) {
-	var stdout bytes.Buffer
-
+func (ig *IG) Run(flags ...string) error {
 	cmd := append([]string{"run", ig.image}, flags...)
 	if err := ig.runWithOutput(cmd); err != nil {
-		return "", err
+		return err
 	}
-	return stdout.String(), nil
+	return nil
+}
+
+func (ig *IG) RunExp(flags ...string) []string {
+	cmd := append([]string{"run", ig.image}, flags...)
+	return cmd
 }
 
 // runWithOutput runs an ig command with the given arguments,
@@ -160,13 +144,41 @@ func (ig *IG) runWithOutput(args []string) error {
 	if err := cmd.Run(); err != nil {
 		switch e := err.(type) {
 		case *exec.Error:
-			fmt.Println("failed executing:", err)
+			return fmt.Errorf("command execution: %w", err)
 		case *exec.ExitError:
-			fmt.Println("command exit code =", e.ExitCode())
+			return fmt.Errorf("command exit code = %d", e.ExitCode())
 		default:
-			panic(err)
+			return err
 		}
 	}
 
 	return nil
+}
+
+func (ig *IG) runWithOutputExp(args []string, stdout io.Writer, stderr io.Writer) error {
+	cmd := exec.Command(ig.path, args...)
+	cmd.Env = append(cmd.Env, "IG_EXPERIMENTAL=true")
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
+
+	if err := cmd.Run(); err != nil {
+		switch e := err.(type) {
+		case *exec.Error:
+			return fmt.Errorf("command execution: %w", err)
+		case *exec.ExitError:
+			return fmt.Errorf("command exit code = %d", e.ExitCode())
+		default:
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (ig *IG) createCmd(args []string) *exec.Cmd {
+	cmd := exec.Command(ig.path, args...)
+	cmd.Env = append(cmd.Env, "IG_EXPERIMENTAL=true")
+
+	return cmd
 }
